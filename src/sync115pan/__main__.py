@@ -7,7 +7,7 @@ import uvicorn
 
 def main() -> None:
     host = os.getenv("SYNC115PAN_HOST", "127.0.0.1")
-    port = int(os.getenv("SYNC115PAN_PORT", "8000"))
+    port = int(os.getenv("SYNC115PAN_PORT", "38000"))
     uvicorn.run("sync115pan.app:app", host=host, port=port, reload=False)
 
 

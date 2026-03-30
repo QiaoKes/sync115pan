@@ -25,13 +25,56 @@ pip install -e .
 sync115pan
 ```
 
-The service starts on `http://127.0.0.1:8000`.
+The service starts on `http://127.0.0.1:38000`.
+
+## Linux NAS Deployment
+
+For a standard Linux NAS with `systemd`, the project can be deployed with one script.
+
+```bash
+git clone <your-repo-url>
+cd sync115pan
+chmod +x scripts/deploy_systemd.sh
+sudo ./scripts/deploy_systemd.sh
+```
+
+The script will:
+
+- create `.venv/`
+- install project dependencies
+- create `.data/systemd.env`
+- write `/etc/systemd/system/sync115pan.service`
+- run `systemctl enable --now sync115pan`
+
+Default runtime values:
+
+- host: `0.0.0.0`
+- port: `38000`
+- data dir: `<repo>/.data`
+
+Optional environment variables before running the script:
+
+- `PYTHON_BIN`: specific Python interpreter, for example `python3.12`
+- `SERVICE_NAME`: custom systemd service name
+- `SERVICE_USER`: custom service user
+- `SERVICE_GROUP`: custom service group
+- `SYNC115PAN_HOST`: bind host
+- `SYNC115PAN_PORT`: bind port
+- `SYNC115PAN_DATA_DIR`: custom data directory
+
+Useful commands after deployment:
+
+```bash
+sudo systemctl status sync115pan
+sudo systemctl restart sync115pan
+sudo journalctl -u sync115pan -f
+```
 
 ## Environment Variables
 
 - `SYNC115PAN_DATA_DIR`: custom data directory. Defaults to `.data/` under the repository root.
 - `SYNC115PAN_HOST`: bind host, default `127.0.0.1`
-- `SYNC115PAN_PORT`: bind port, default `8000`
+- `SYNC115PAN_PORT`: bind port, default `38000`
 
 ## Notes
 

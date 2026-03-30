@@ -74,24 +74,17 @@ SYNC_STATUS_LABELS = {
     "error": "异常",
 }
 
+WATCH_MODE_LABELS = {
+    "auto": "自动",
+    "native": "原生事件",
+    "polling": "轮询",
+}
+
 JOB_LABELS = {
     "": "待命",
     "full_scan": "全量同步",
     "incremental_recheck": "增量重检",
 }
-
-LOG_LEVEL_LABELS = {
-    "info": "信息",
-    "warning": "警告",
-    "error": "错误",
-}
-
-
-def translate_log(log: dict[str, Any]) -> dict[str, Any]:
-    translated = dict(log)
-    translated["level_label"] = LOG_LEVEL_LABELS.get(str(log["level"]), str(log["level"]))
-    return translated
-
 
 def translated_runtime() -> dict[str, Any]:
     runtime_info = runtime.runtime_info()
@@ -99,6 +92,12 @@ def translated_runtime() -> dict[str, Any]:
     sync_info["status_label"] = SYNC_STATUS_LABELS.get(sync_info["status"], sync_info["status"])
     sync_info["current_job_label"] = JOB_LABELS.get(sync_info["current_job"], "待命")
     runtime_info["sync"] = sync_info
+    configured_mode = str(state.get_config().get("watch_mode", "auto") or "auto")
+    resolved_mode = str(runtime_info.get("watch_mode", configured_mode) or configured_mode)
+    if configured_mode == "auto" and resolved_mode != "auto":
+        runtime_info["watch_mode_label"] = f"自动（当前{WATCH_MODE_LABELS.get(resolved_mode, resolved_mode)}）"
+    else:
+        runtime_info["watch_mode_label"] = WATCH_MODE_LABELS.get(configured_mode, configured_mode)
     return runtime_info
 
 
@@ -110,7 +109,7 @@ def dashboard_context(request: Request) -> dict[str, Any]:
         "request": request,
         "config": config,
         "runtime": runtime_info,
-        "logs": [translate_log(log) for log in state.list_logs(limit=50)],
+        "logs": state.list_logs(limit=50),
         "auth_configured": bool(config["auth_value"]),
         "config_ready": bool(config["local_path"] and config["cloud_root_id"]),
     }
@@ -210,7 +209,7 @@ async def api_run_full_sync() -> dict[str, str]:
 
 @app.get("/api/logs")
 async def api_logs() -> list[dict[str, Any]]:
-    return [translate_log(log) for log in state.list_logs(limit=200)]
+    return state.list_logs(limit=200)
 
 
 @app.get("/api/runtime")

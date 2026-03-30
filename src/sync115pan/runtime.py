@@ -91,7 +91,7 @@ class RuntimeSupervisor:
         self.state.log("info", "本地监听已停止")
 
     def _watch_loop(self, local_root: Path, config: dict[str, Any], stop_event: threading.Event) -> None:
-        watch_mode, force_polling = resolve_watch_mode(str(config["watch_mode"]))
+        _, force_polling = resolve_watch_mode(str(config["watch_mode"]))
         debounce_ms = max(int(config["debounce_seconds"]), 1) * 1000
         for changes in watch(
             local_root,

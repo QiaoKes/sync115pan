@@ -103,7 +103,7 @@ function renderRuntime(runtime) {
   const sync = runtime.sync || {};
   document.getElementById("runtime-status").textContent = sync.status_label || sync.status || "空闲";
   document.getElementById("runtime-job").textContent = sync.current_job_label || "待命";
-  document.getElementById("runtime-watch-mode").textContent = runtime.watch_mode || "auto";
+  document.getElementById("runtime-watch-mode").textContent = runtime.watch_mode_label || runtime.watch_mode || "自动";
   document.getElementById("runtime-watcher").textContent = runtime.watcher_running ? "运行中" : "未启动";
   document.getElementById("runtime-last-full-sync").textContent = sync.last_full_sync_at || "暂无";
   document.getElementById("runtime-pending").textContent = String(sync.pending_scope_count || 0);

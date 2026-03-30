@@ -36,14 +36,6 @@ class SyncService:
         self._last_error = ""
         self._last_full_sync_at = ""
 
-    def _write_debug_snapshot(self, name: str, lines: list[str]) -> Path:
-        debug_dir = self.app_paths.data_dir / "debug"
-        debug_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = debug_dir / f"{stamp}-{name}.txt"
-        path.write_text("\n".join(lines), encoding="utf-8")
-        return path
-
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -146,7 +138,7 @@ class SyncService:
         cloud = self._make_cloud(config)
         local_rows = walk_local_tree(local_root)
         local_map = {row["relative_path"]: row for row in local_rows}
-        raw_cloud_paths, cloud_entries = cloud.export_tree_debug(config["cloud_root_id"])
+        _, cloud_entries = cloud.export_tree_debug(config["cloud_root_id"])
         cloud_paths = {entry.relative_path for entry in cloud_entries}
         missing_dirs = sorted(
             [path for path, row in local_map.items() if row["is_dir"] and path not in cloud_paths],
@@ -160,24 +152,6 @@ class SyncService:
             "info",
             f"全量检查：本地 {len(local_rows)} 条，云端 {len(cloud_paths)} 条，待创建目录 {len(missing_dirs)} 个，待同步文件 {len(missing_files)} 个",
         )
-        # 调试快照先保留实现但默认停用，避免全量同步时持续导出本地树和云端树文件。
-        # local_snapshot = self._write_debug_snapshot(
-        #     "full-local-tree",
-        #     [f"{'DIR' if row['is_dir'] else 'FILE'}\t{row['relative_path']}" for row in local_rows],
-        # )
-        # raw_cloud_snapshot = self._write_debug_snapshot("full-cloud-export-raw", raw_cloud_paths)
-        # normalized_cloud_snapshot = self._write_debug_snapshot(
-        #     "full-cloud-export-normalized",
-        #     [entry.relative_path for entry in cloud_entries],
-        # )
-        # missing_snapshot = self._write_debug_snapshot(
-        #     "full-missing-paths",
-        #     ["[DIR] " + path for path in missing_dirs] + ["[FILE] " + path for path in missing_files],
-        # )
-        # self.state.log(
-        #     "info",
-        #     f"全量排障快照已写入：本地树={local_snapshot.name}，云端原始树={raw_cloud_snapshot.name}，云端归一化树={normalized_cloud_snapshot.name}，缺失清单={missing_snapshot.name}",
-        # )
         self._ensure_directories(cloud, missing_dirs, dir_cache)
         self._upload_missing_files(config, cloud, local_root, missing_files, dir_cache)
         with self._condition:

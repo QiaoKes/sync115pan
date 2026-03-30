@@ -10,10 +10,6 @@ class DummyCloud:
         assert root_id == "1"
         return [], []
 
-    def export_tree(self, root_id):
-        assert root_id == "1"
-        return []
-
     def attempt_instant_upload(self, local_path: Path, parent_id: int, filename: str):
         assert parent_id == 1
         return {

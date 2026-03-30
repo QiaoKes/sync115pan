@@ -1,32 +1,67 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
 *.so
-*.dylib
 
-# Test binary, built with `go test -c`
-*.test
+# Distribution / packaging
+.Python
+build/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+share/python-wheels/
+*.egg-info/
+*.egg
+MANIFEST
+pip-wheel-metadata/
 
-# Code coverage profiles and other test artifacts
-*.out
-coverage.*
-*.coverprofile
-profile.cov
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Unit test / coverage reports
+.coverage
+.coverage.*
+.pytest_cache/
+.hypothesis/
+.tox/
+.nox/
+coverage.xml
+htmlcov/
+*.cover
+*.py,cover
 
-# Go workspace file
-go.work
-go.work.sum
+# Type checkers / linters
+.mypy_cache/
+.pyre/
+.ruff_cache/
 
-# env file
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local app data
+.data/
+
+# Environments
 .env
+.env.*
 
-# Editor/IDE
-# .idea/
-# .vscode/
+# IDE / editor
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+.codex

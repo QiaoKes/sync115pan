@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block body %}
+<section class="topbar">
+  <div>
+    <p class="brand-kicker">115 云盘同步控制台</p>
+    <h1>单任务同步</h1>
+    <p class="brand-copy">当前版本只维护一份全局同步配置。全量同步使用低风控导出接口做路径比对，新增监听与 cron 调度共享同一个后台同步器。</p>
+  </div>
+  <div class="topbar-actions">
+    <button class="ghost-btn" type="button" id="open-settings-btn">设置 Cookie</button>
+    <button class="primary-btn" type="button" id="run-full-sync-btn" {% if not config_ready %}disabled{% endif %}>立即全量同步</button>
+  </div>
+</section>
+
+<section class="overview-grid">
+  <article class="stat-card">
+    <span>Cookie 状态</span>
+    <strong>{{ "已配置" if auth_configured else "未配置" }}</strong>
+  </article>
+  <article class="stat-card">
+    <span>配置状态</span>
+    <strong>{{ "已完成" if config_ready else "待补全" }}</strong>
+  </article>
+  <article class="stat-card">
+    <span>当前同步</span>
+    <strong>{{ runtime.sync.status_label }}</strong>
+  </article>
+  <article class="stat-card">
+    <span>运行环境</span>
+    <strong>{{ "Docker" if runtime.docker else "宿主机" }}</strong>
+  </article>
+</section>
+
+<section class="main-grid single-side">
+  <article class="panel panel-form">
+    <div class="panel-head">
+      <div>
+        <p class="panel-kicker">全局配置</p>
+        <h2>同步设置</h2>
+      </div>
+      <span class="badge">{{ "已就绪" if config_ready else "请先选择目录" }}</span>
+    </div>
+
+    <form id="sync-config-form" class="form-grid">
+      <label class="field">
+        <span>本地目录</span>
+        <div class="picker-row">
+          <input id="local_path" name="local_path" value="{{ config.local_path }}" placeholder="点击右侧按钮选择本地目录" readonly required>
+          <button class="picker-btn" type="button" id="pick-local-btn">选择本地目录</button>
+        </div>
+      </label>
+
+      <label class="field">
+        <span>云盘目录</span>
+        <input id="cloud_root_id" name="cloud_root_id" type="hidden" value="{{ config.cloud_root_id }}">
+        <div class="picker-row">
+          <input id="cloud_path_display" name="cloud_path" value="{{ config.cloud_path }}" placeholder="点击右侧按钮选择云盘目录" readonly required>
+          <button class="picker-btn" type="button" id="pick-cloud-btn">选择云盘目录</button>
+        </div>
+      </label>
+
+      <div class="field-grid">
+        <label class="field">
+          <span>Cron 表达式</span>
+          <input id="schedule_cron" name="schedule_cron" value="{{ config.schedule_cron }}" placeholder="例如：0 */6 * * *">
+          <small class="field-hint">用于定时触发全量同步；留空表示只手动执行全量，同步监听不受这里影响。</small>
+        </label>
+        <label class="field">
+          <span>监听模式</span>
+          <select id="watch_mode" name="watch_mode">
+            <option value="auto" {% if config.watch_mode == "auto" %}selected{% endif %}>自动</option>
+            <option value="native" {% if config.watch_mode == "native" %}selected{% endif %}>原生事件</option>
+            <option value="polling" {% if config.watch_mode == "polling" %}selected{% endif %}>轮询</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="field-grid metrics-grid">
+        <label class="field">
+          <span>去抖秒数</span>
+          <input id="debounce_seconds" name="debounce_seconds" type="number" min="1" value="{{ config.debounce_seconds }}">
+        </label>
+        <label class="field">
+          <span>稳定检查秒数</span>
+          <input id="stability_check_seconds" name="stability_check_seconds" type="number" min="1" value="{{ config.stability_check_seconds }}">
+        </label>
+        <label class="field">
+          <span>秒传失败次数</span>
+          <input id="max_instant_failures" name="max_instant_failures" type="number" min="1" value="{{ config.max_instant_failures }}">
+        </label>
+        <label class="field">
+          <span>失败间隔秒数</span>
+          <input id="retry_interval_seconds" name="retry_interval_seconds" type="number" min="0" value="{{ config.retry_interval_seconds }}">
+        </label>
+      </div>
+
+      <div class="switch-grid">
+        <label class="switch-item"><input id="watch_enabled" type="checkbox" {% if config.watch_enabled %}checked{% endif %}><span>开启新增监听</span></label>
+      </div>
+
+      <div class="form-actions">
+        <button class="primary-btn" type="submit">保存配置</button>
+        <p id="form-message" class="form-message"></p>
+      </div>
+    </form>
+  </article>
+
+  <article class="panel">
+    <div class="panel-head">
+      <div>
+        <p class="panel-kicker">运行状态</p>
+        <h2>当前状态</h2>
+      </div>
+    </div>
+
+    <dl class="meta-grid">
+      <div><dt>同步状态</dt><dd id="runtime-status">{{ runtime.sync.status_label }}</dd></div>
+      <div><dt>当前任务</dt><dd id="runtime-job">{{ runtime.sync.current_job_label }}</dd></div>
+      <div><dt>监听模式</dt><dd id="runtime-watch-mode">{{ runtime.watch_mode }}</dd></div>
+      <div><dt>监听线程</dt><dd id="runtime-watcher">{{ "运行中" if runtime.watcher_running else "未启动" }}</dd></div>
+      <div><dt>上次全量同步</dt><dd id="runtime-last-full-sync">{{ runtime.sync.last_full_sync_at or "暂无" }}</dd></div>
+      <div><dt>待处理目录</dt><dd id="runtime-pending">{{ runtime.sync.pending_scope_count }}</dd></div>
+    </dl>
+
+    <div class="status-note">
+      <strong>最近错误</strong>
+      <p id="runtime-error">{{ runtime.sync.last_error or "暂无" }}</p>
+    </div>
+  </article>
+</section>
+
+<section class="bottom-grid single-log">
+  <article class="panel">
+    <div class="panel-head compact">
+      <div>
+        <p class="panel-kicker">运行日志</p>
+        <h2>最近日志</h2>
+      </div>
+      <div class="topbar-actions">
+        <button class="ghost-btn small-btn" type="button" id="refresh-runtime-btn">刷新状态</button>
+        <button class="ghost-btn small-btn" type="button" id="refresh-logs-btn">刷新日志</button>
+      </div>
+    </div>
+    <ul class="timeline roomy-timeline" id="recent-logs-list">
+      {% for log in logs %}
+      <li>
+        <strong>{{ log.level_label }}</strong>
+        <span>{{ log.message }}</span>
+        <small>{{ log.created_at }}</small>
+      </li>
+      {% else %}
+      <li>暂无日志</li>
+      {% endfor %}
+    </ul>
+  </article>
+</section>
+
+<dialog id="settings-modal" class="dialog-shell">
+  <form method="dialog" class="dialog-card">
+    <div class="dialog-head">
+      <div>
+        <p class="panel-kicker">连接设置</p>
+        <h2>115 Cookie</h2>
+      </div>
+      <button class="icon-btn" type="submit">关闭</button>
+    </div>
+    <div class="dialog-body">
+      <label class="field">
+        <span>Cookie 字符串</span>
+        <textarea id="settings-auth-value" rows="8">{{ config.auth_value }}</textarea>
+      </label>
+      <p id="settings-message" class="form-message"></p>
+    </div>
+    <div class="dialog-actions">
+      <button class="ghost-btn" type="submit">取消</button>
+      <button class="primary-btn" type="button" id="save-settings-btn">保存 Cookie</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="cloud-picker-modal" class="dialog-shell">
+  <form method="dialog" class="dialog-card cloud-dialog">
+    <div class="dialog-head">
+      <div>
+        <p class="panel-kicker">云盘目录选择</p>
+        <h2>选择同步到的目标文件夹</h2>
+      </div>
+      <button class="icon-btn" type="submit">关闭</button>
+    </div>
+    <div class="dialog-toolbar">
+      <button class="ghost-btn small-btn" type="button" id="cloud-up-btn">返回上一级</button>
+      <button class="primary-btn small-btn" type="button" id="cloud-select-btn">选择当前目录</button>
+    </div>
+    <div class="cloud-path" id="cloud-current-path">/</div>
+    <div class="cloud-list" id="cloud-list"></div>
+    <p id="cloud-message" class="form-message"></p>
+  </form>
+</dialog>
+
+<script>
+  window.sync115pan = {
+    authConfigured: {{ "true" if auth_configured else "false" }},
+  };
+</script>
+<script src="{{ url_for('static', path='/app.js') }}"></script>
+{% endblock %}

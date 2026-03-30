@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sync115pan"
+version = "0.1.0"
+description = "Local-to-115 sync service with full scan and watchfiles-based incremental sync."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+  { name = "OpenAI Codex" }
+]
+dependencies = [
+  "croniter>=6.0.0",
+  "fastapi>=0.115.0",
+  "jinja2>=3.1.0",
+  "pydantic>=2.10.0",
+  "uvicorn[standard]>=0.34.0",
+  "watchfiles>=1.1.1",
+  "p115client @ git+https://github.com/ChenyangGao/p115client.git",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.28.0",
+  "pytest>=8.3.0",
+]
+
+[project.scripts]
+sync115pan = "sync115pan.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sync115pan"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

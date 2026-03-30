@@ -108,10 +108,6 @@ class SyncService:
                 self._status = "running"
                 self._current_job = job_kind
                 self._last_error = ""
-            self.state.log(
-                "info",
-                f"开始执行同步任务：类型={job_kind}，作用范围={','.join(scopes) if scopes else '/'}",
-            )
             try:
                 if job_kind == "full_scan":
                     self._run_full_sync()
@@ -160,42 +156,33 @@ class SyncService:
             [path for path, row in local_map.items() if not row["is_dir"] and path not in cloud_paths]
         )
         dir_cache = {"": int(config["cloud_root_id"])}
-        self.state.log("info", f"本地目录扫描完成：共 {len(local_rows)} 条")
-        self.state.log("info", f"云端目录树已通过导出接口获取：/，共 {len(cloud_paths)} 条")
         self.state.log(
             "info",
-            f"全量比对结果：缺失目录 {len(missing_dirs)} 个，缺失文件 {len(missing_files)} 个",
+            f"全量检查：本地 {len(local_rows)} 条，云端 {len(cloud_paths)} 条，待创建目录 {len(missing_dirs)} 个，待同步文件 {len(missing_files)} 个",
         )
-        if missing_dirs:
-            preview = "，".join(missing_dirs[:10])
-            suffix = " ..." if len(missing_dirs) > 10 else ""
-            self.state.log("info", f"全量缺失目录预览：{preview}{suffix}")
-        if missing_files:
-            preview = "，".join(missing_files[:10])
-            suffix = " ..." if len(missing_files) > 10 else ""
-            self.state.log("info", f"全量缺失文件预览：{preview}{suffix}")
-        local_snapshot = self._write_debug_snapshot(
-            "full-local-tree",
-            [f"{'DIR' if row['is_dir'] else 'FILE'}\t{row['relative_path']}" for row in local_rows],
-        )
-        raw_cloud_snapshot = self._write_debug_snapshot("full-cloud-export-raw", raw_cloud_paths)
-        normalized_cloud_snapshot = self._write_debug_snapshot(
-            "full-cloud-export-normalized",
-            [entry.relative_path for entry in cloud_entries],
-        )
-        missing_snapshot = self._write_debug_snapshot(
-            "full-missing-paths",
-            ["[DIR] " + path for path in missing_dirs] + ["[FILE] " + path for path in missing_files],
-        )
-        self.state.log(
-            "info",
-            f"全量排障快照已写入：本地树={local_snapshot.name}，云端原始树={raw_cloud_snapshot.name}，云端归一化树={normalized_cloud_snapshot.name}，缺失清单={missing_snapshot.name}",
-        )
+        # 调试快照先保留实现但默认停用，避免全量同步时持续导出本地树和云端树文件。
+        # local_snapshot = self._write_debug_snapshot(
+        #     "full-local-tree",
+        #     [f"{'DIR' if row['is_dir'] else 'FILE'}\t{row['relative_path']}" for row in local_rows],
+        # )
+        # raw_cloud_snapshot = self._write_debug_snapshot("full-cloud-export-raw", raw_cloud_paths)
+        # normalized_cloud_snapshot = self._write_debug_snapshot(
+        #     "full-cloud-export-normalized",
+        #     [entry.relative_path for entry in cloud_entries],
+        # )
+        # missing_snapshot = self._write_debug_snapshot(
+        #     "full-missing-paths",
+        #     ["[DIR] " + path for path in missing_dirs] + ["[FILE] " + path for path in missing_files],
+        # )
+        # self.state.log(
+        #     "info",
+        #     f"全量排障快照已写入：本地树={local_snapshot.name}，云端原始树={raw_cloud_snapshot.name}，云端归一化树={normalized_cloud_snapshot.name}，缺失清单={missing_snapshot.name}",
+        # )
         self._ensure_directories(cloud, missing_dirs, dir_cache)
         self._upload_missing_files(config, cloud, local_root, missing_files, dir_cache)
         with self._condition:
             self._last_full_sync_at = isoformat()
-        self.state.log("info", "全量同步完成")
+        self.state.log("info", f"全量同步完成：创建目录 {len(missing_dirs)} 个，同步文件 {len(missing_files)} 个")
 
     def _run_incremental(self, scopes: list[str]) -> None:
         if not scopes:
@@ -204,10 +191,21 @@ class SyncService:
         local_root = Path(config["local_path"]).expanduser().resolve()
         cloud = self._make_cloud(config)
         dir_cache = {"": int(config["cloud_root_id"])}
+        total_missing_dirs: list[str] = []
+        total_missing_files: list[str] = []
         for scope in scopes:
-            self._sync_scope(config, cloud, local_root, scope, dir_cache)
-        scope_text = "、".join(scope or "/" for scope in scopes)
-        self.state.log("info", f"增量重检完成：{scope_text}")
+            missing_dirs, missing_files = self._sync_scope(config, cloud, local_root, scope, dir_cache)
+            total_missing_dirs.extend(missing_dirs)
+            total_missing_files.extend(missing_files)
+        if total_missing_dirs or len(total_missing_files) > 1:
+            scope_text = "、".join(scope or "/" for scope in scopes)
+            dir_text = "；".join(total_missing_dirs[:5]) if total_missing_dirs else "无"
+            file_text = "；".join(str(local_root / Path(path)) for path in total_missing_files[:5]) if total_missing_files else "无"
+            suffix = " ..." if len(total_missing_dirs) > 5 or len(total_missing_files) > 5 else ""
+            self.state.log(
+                "info",
+                f"增量检查完成：范围={scope_text}，待创建目录={dir_text}，待同步文件={file_text}{suffix}",
+            )
 
     def _sync_scope(
         self,
@@ -216,7 +214,7 @@ class SyncService:
         local_root: Path,
         scope: str,
         dir_cache: dict[str, int],
-    ) -> None:
+    ) -> tuple[list[str], list[str]]:
         local_rows = walk_local_tree(local_root, scope=scope)
         local_map = {row["relative_path"]: row for row in local_rows}
         cloud_paths: set[str] = set()
@@ -236,16 +234,9 @@ class SyncService:
         missing_files = sorted(
             [path for path, row in local_map.items() if not row["is_dir"] and path not in cloud_paths]
         )
-        self.state.log(
-            "info",
-            f"增量比对结果：范围={scope or '/'}，本地 {len(local_rows)} 条，云端 {len(cloud_paths)} 条，缺失目录 {len(missing_dirs)} 个，缺失文件 {len(missing_files)} 个",
-        )
-        if missing_files:
-            preview = "，".join(missing_files[:10])
-            suffix = " ..." if len(missing_files) > 10 else ""
-            self.state.log("info", f"增量缺失文件预览：{preview}{suffix}")
         self._ensure_directories(cloud, missing_dirs, dir_cache)
         self._upload_missing_files(config, cloud, local_root, missing_files, dir_cache)
+        return missing_dirs, missing_files
 
     def _resolve_remote_directory_id(
         self,
@@ -287,7 +278,7 @@ class SyncService:
                 raise Cloud115Error(f"云端父目录不存在：{parent_path or '/'}")
             remote_id = cloud.ensure_directory(parent_remote_id, name)
             dir_cache[relative_path] = remote_id
-            self.state.log("info", f"已创建云端目录：{relative_path}")
+            self.state.log("info", f"已创建云端目录：/{relative_path}")
 
     def _upload_missing_files(
         self,
@@ -299,11 +290,12 @@ class SyncService:
     ) -> None:
         for relative_path in missing_files:
             local_path = local_root / Path(relative_path)
+            cloud_path = f"/{relative_path}" if relative_path else "/"
             if not local_path.exists():
                 self.state.reset_retry_state(relative_path)
                 continue
             if not wait_for_file_stable(local_path, int(config["stability_check_seconds"])):
-                self.state.log("warning", f"文件仍在写入，暂时跳过：{relative_path}")
+                self.state.log("warning", f"文件仍在写入，稍后重试：本地={local_path}，云端={cloud_path}")
                 self.request_recheck(relative_parent(relative_path))
                 continue
 
@@ -311,16 +303,12 @@ class SyncService:
             parent_remote_id = self._resolve_remote_directory_id(cloud, parent_path, dir_cache)
             if parent_remote_id is None:
                 raise Cloud115Error(f"云端目录不存在或无法定位：{parent_path or '/'}")
-            self.state.log(
-                "info",
-                f"准备上传文件：{relative_path}，父目录={parent_path or '/'}，父目录ID={parent_remote_id}",
-            )
 
             instant = cloud.attempt_instant_upload(local_path, parent_remote_id, local_path.name)
             response = instant["response"]
             if response.get("reuse"):
                 self.state.reset_retry_state(relative_path)
-                self.state.log("info", f"秒传成功，已完成同步：{relative_path}")
+                self.state.log("info", f"文件已同步：方式=秒传，本地={local_path}，云端={cloud_path}")
                 continue
 
             error_text = str(response.get("statusmsg") or response.get("message") or "instant upload miss")
@@ -335,7 +323,7 @@ class SyncService:
             if not can_fallback:
                 self.state.log(
                     "info",
-                    f"秒传未命中：{relative_path}，等待达到阈值后再转普通上传（第 {current_retry['instant_fail_count']} 次）",
+                    f"文件待重试：本地={local_path}，云端={cloud_path}，方式=秒传，第 {current_retry['instant_fail_count']} 次",
                 )
                 continue
 
@@ -347,4 +335,4 @@ class SyncService:
                 int(instant["filesize"]),
             )
             self.state.reset_retry_state(relative_path)
-            self.state.log("info", f"普通上传完成：{relative_path}")
+            self.state.log("info", f"文件已同步：方式=普通上传，本地={local_path}，云端={cloud_path}")

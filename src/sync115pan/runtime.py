@@ -100,10 +100,19 @@ class RuntimeSupervisor:
             debounce=debounce_ms,
             force_polling=force_polling,
         ):
-            scopes = dedupe_scopes(local_root, [change[1] for change in changes]) or [""]
+            changed_paths = [change[1] for change in changes]
+            scopes = dedupe_scopes(local_root, changed_paths) or [""]
             for scope in scopes:
                 self.sync_service.request_recheck(scope)
-            self.state.log("info", f"收到本地变更事件：模式 {watch_mode}，涉及 {len(scopes)} 个目录")
+            if len(changed_paths) == 1 and len(scopes) == 1:
+                self.state.log("info", f"检测到本地变更：{changed_paths[0]}，已安排增量检查 {scopes[0] or '/'}")
+            else:
+                preview = "；".join(changed_paths[:3])
+                suffix = " ..." if len(changed_paths) > 3 else ""
+                self.state.log(
+                    "info",
+                    f"检测到本地变更：{len(changed_paths)} 个路径，示例：{preview}{suffix}，已安排增量检查 {len(scopes)} 个目录",
+                )
 
     def _scheduler_loop(self) -> None:
         while not self._scheduler_stop.is_set():

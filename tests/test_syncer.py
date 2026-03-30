@@ -54,5 +54,5 @@ def test_full_sync_uses_export_and_uploads_missing_file(tmp_path: Path) -> None:
     service._run_full_sync()
 
     logs = state.list_logs()
-    assert any("云端目录树已通过导出接口获取" in log["message"] for log in logs)
-    assert any("秒传成功，已完成同步：demo.txt" in log["message"] for log in logs)
+    assert any("全量检查：" in log["message"] for log in logs)
+    assert any("文件已同步：方式=秒传" in log["message"] and "demo.txt" in log["message"] for log in logs)

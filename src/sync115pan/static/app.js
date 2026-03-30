@@ -92,9 +92,7 @@ function renderLogs(logs) {
     .map(
       (log) => `
         <li>
-          <strong>${log.level_label || log.level}</strong>
-          <span>${log.message}</span>
-          <small>${log.created_at}</small>
+          <span><strong>${String(log.level || "").toUpperCase()}</strong> ${log.created_at} ${log.message}</span>
         </li>
       `
     )
@@ -173,23 +171,6 @@ document.getElementById("save-settings-btn")?.addEventListener("click", async ()
   }
 });
 
-document.getElementById("refresh-logs-btn")?.addEventListener("click", async () => {
-  try {
-    const logs = await requestJson("/api/logs");
-    renderLogs(logs);
-  } catch (error) {
-    alert(error.message);
-  }
-});
-
-document.getElementById("refresh-runtime-btn")?.addEventListener("click", async () => {
-  try {
-    await refreshRuntime();
-  } catch (error) {
-    alert(error.message);
-  }
-});
-
 document.getElementById("pick-local-btn")?.addEventListener("click", async () => {
   setMessage(formMessage, "");
   const initialPath = localPathInput.value ? `?initial_path=${encodeURIComponent(localPathInput.value)}` : "";
@@ -251,3 +232,18 @@ document.getElementById("run-full-sync-btn")?.addEventListener("click", async ()
 });
 
 updateRunButtonState();
+
+async function refreshDashboard() {
+  try {
+    const [runtime, logs] = await Promise.all([
+      requestJson("/api/runtime"),
+      requestJson("/api/logs"),
+    ]);
+    renderRuntime(runtime);
+    renderLogs(logs);
+  } catch (_) {
+    // 后台刷新失败时不打断用户当前操作，等待下一轮刷新。
+  }
+}
+
+setInterval(refreshDashboard, 5000);

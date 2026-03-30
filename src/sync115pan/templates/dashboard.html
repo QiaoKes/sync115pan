@@ -4,7 +4,6 @@
   <div>
     <p class="brand-kicker">115 云盘同步控制台</p>
     <h1>单任务同步</h1>
-    <p class="brand-copy">当前版本只维护一份全局同步配置。全量同步使用低风控导出接口做路径比对，新增监听与 cron 调度共享同一个后台同步器。</p>
   </div>
   <div class="topbar-actions">
     <button class="ghost-btn" type="button" id="open-settings-btn">设置 Cookie</button>
@@ -136,17 +135,11 @@
         <p class="panel-kicker">运行日志</p>
         <h2>最近日志</h2>
       </div>
-      <div class="topbar-actions">
-        <button class="ghost-btn small-btn" type="button" id="refresh-runtime-btn">刷新状态</button>
-        <button class="ghost-btn small-btn" type="button" id="refresh-logs-btn">刷新日志</button>
-      </div>
     </div>
     <ul class="timeline roomy-timeline" id="recent-logs-list">
       {% for log in logs %}
       <li>
-        <strong>{{ log.level_label }}</strong>
-        <span>{{ log.message }}</span>
-        <small>{{ log.created_at }}</small>
+        <span><strong>{{ log.level|upper }}</strong> {{ log.created_at }} {{ log.message }}</span>
       </li>
       {% else %}
       <li>暂无日志</li>

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
 import threading
 from typing import Any
 
 
+SHANGHAI_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
+MAX_LOG_BYTES = 100 * 1024 * 1024
+
+
 def utcnow() -> datetime:
-    return datetime.now(tz=UTC)
+    return datetime.now(tz=SHANGHAI_TZ)
 
 
 def isoformat(dt: datetime | None = None) -> str:
@@ -132,6 +136,12 @@ class AppState:
         }
         line = json.dumps(record, ensure_ascii=False)
         with self._lock:
+            if self.log_path.exists():
+                try:
+                    if self.log_path.stat().st_size > MAX_LOG_BYTES:
+                        self.log_path.write_text("", encoding="utf-8")
+                except OSError:
+                    pass
             with self.log_path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
 

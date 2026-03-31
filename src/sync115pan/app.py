@@ -26,11 +26,20 @@ def normalize_auth_value(auth_value: str) -> str:
 
 def normalize_cloud_path_display(cloud_path: str) -> str:
     cleaned = str(cloud_path or "").strip()
-    if cleaned == "根目录":
+    if not cleaned or cleaned == "根目录" or cleaned == "/":
         return "/"
     if cleaned.startswith("根目录 / "):
-        return cleaned.removeprefix("根目录 / ")
-    return cleaned
+        cleaned = cleaned.removeprefix("根目录 / ")
+    normalized = cleaned.replace(" / ", "/").strip("/")
+    return f"/{normalized}" if normalized else "/"
+
+
+def local_picker_available() -> bool:
+    if is_docker():
+        return False
+    if os.name == "nt":
+        return True
+    return bool(os.getenv("DISPLAY"))
 
 
 class ConfigPayload(BaseModel):
@@ -112,6 +121,8 @@ def dashboard_context(request: Request) -> dict[str, Any]:
         "logs": state.list_logs(limit=50),
         "auth_configured": bool(config["auth_value"]),
         "config_ready": bool(config["local_path"] and config["cloud_root_id"]),
+        "local_picker_available": local_picker_available(),
+        "data_dir": os.fspath(app_paths.data_dir),
     }
 
 
@@ -128,6 +139,8 @@ async def get_config() -> dict[str, Any]:
         **config,
         "auth_configured": bool(config["auth_value"]),
         "config_ready": bool(config["local_path"] and config["cloud_root_id"]),
+        "local_picker_available": local_picker_available(),
+        "data_dir": os.fspath(app_paths.data_dir),
     }
 
 
@@ -190,11 +203,8 @@ async def api_pick_local_directory(initial_path: str | None = Query(default=None
 async def api_cloud_directories(parent_id: str = Query(default="0")) -> dict[str, Any]:
     cloud = make_cloud_service()
     try:
-        dirs = [
-            {"id": str(entry.remote_id), "name": entry.name}
-            for entry in cloud.list_directory(parent_id)
-            if entry.is_dir
-        ]
+        directories, _ = cloud.list_children(parent_id)
+        dirs = [{"id": str(remote_id), "name": name} for name, remote_id in directories.items()]
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     dirs.sort(key=lambda item: item["name"].lower())

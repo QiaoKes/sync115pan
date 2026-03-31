@@ -65,3 +65,5 @@ ENV/
 .DS_Store
 Thumbs.db
 .codex
+manual-sync-test/
+manual-fixtures/

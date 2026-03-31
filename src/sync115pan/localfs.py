@@ -12,8 +12,14 @@ def to_posix_relative(path: Path, root: Path) -> str:
     return PurePosixPath(*relative.parts).as_posix()
 
 
+def to_local_path(relative_path: str, root: Path) -> Path:
+    if not relative_path:
+        return root.resolve()
+    return root.resolve().joinpath(*PurePosixPath(relative_path).parts)
+
+
 def walk_local_tree(root: Path, scope: str = "") -> list[dict]:
-    scope_path = root / Path(scope) if scope else root
+    scope_path = to_local_path(scope, root) if scope else root
     if not scope_path.exists():
         return []
 

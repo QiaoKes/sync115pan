@@ -7,7 +7,7 @@ from typing import Any
 
 from .cloud115 import Cloud115Error, Cloud115Service
 from .config import AppPaths
-from .localfs import wait_for_file_stable, walk_local_tree
+from .localfs import to_local_path, wait_for_file_stable, walk_local_tree
 from .store import AppState, isoformat
 
 
@@ -35,6 +35,14 @@ class SyncService:
         self._current_job = ""
         self._last_error = ""
         self._last_full_sync_at = ""
+
+    def _write_debug_snapshot(self, name: str, lines: list[str]) -> Path:
+        debug_dir = self.app_paths.data_dir / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = debug_dir / f"{stamp}-{name}.txt"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -135,11 +143,11 @@ class SyncService:
     def _run_full_sync(self) -> None:
         config = self._current_config()
         local_root = Path(config["local_path"]).expanduser().resolve()
+        root_id = int(config["cloud_root_id"])
         cloud = self._make_cloud(config)
         local_rows = walk_local_tree(local_root)
         local_map = {row["relative_path"]: row for row in local_rows}
-        _, cloud_entries = cloud.export_tree_debug(config["cloud_root_id"])
-        cloud_paths = {entry.relative_path for entry in cloud_entries}
+        raw_cloud_paths, cloud_paths = cloud.export_relative_paths(root_id, str(config.get("cloud_path", "")), include_raw=True)
         missing_dirs = sorted(
             [path for path, row in local_map.items() if row["is_dir"] and path not in cloud_paths],
             key=lambda item: item.count("/"),
@@ -147,13 +155,30 @@ class SyncService:
         missing_files = sorted(
             [path for path, row in local_map.items() if not row["is_dir"] and path not in cloud_paths]
         )
-        dir_cache = {"": int(config["cloud_root_id"])}
+        dir_cache = {"": root_id}
         self.state.log(
             "info",
             f"全量检查：本地 {len(local_rows)} 条，云端 {len(cloud_paths)} 条，待创建目录 {len(missing_dirs)} 个，待同步文件 {len(missing_files)} 个",
         )
-        self._ensure_directories(cloud, missing_dirs, dir_cache)
-        self._upload_missing_files(config, cloud, local_root, missing_files, dir_cache)
+        local_snapshot = self._write_debug_snapshot(
+            "full-local-tree",
+            [f"{'DIR' if row['is_dir'] else 'FILE'}\t{row['relative_path']}" for row in local_rows],
+        )
+        raw_cloud_snapshot = self._write_debug_snapshot("full-cloud-export-raw", raw_cloud_paths)
+        normalized_cloud_snapshot = self._write_debug_snapshot(
+            "full-cloud-export-normalized",
+            sorted(cloud_paths),
+        )
+        missing_snapshot = self._write_debug_snapshot(
+            "full-missing-paths",
+            ["[DIR] " + path for path in missing_dirs] + ["[FILE] " + path for path in missing_files],
+        )
+        self.state.log(
+            "info",
+            f"全量排障快照已写入：本地树={local_snapshot.name}，云端原始树={raw_cloud_snapshot.name}，云端归一化树={normalized_cloud_snapshot.name}，缺失清单={missing_snapshot.name}",
+        )
+        self._ensure_directories(cloud, root_id, missing_dirs, dir_cache)
+        self._upload_missing_files(config, cloud, local_root, missing_files, root_id, dir_cache)
         with self._condition:
             self._last_full_sync_at = isoformat()
         self.state.log("info", f"全量同步完成：创建目录 {len(missing_dirs)} 个，同步文件 {len(missing_files)} 个")
@@ -163,18 +188,19 @@ class SyncService:
             return
         config = self._current_config()
         local_root = Path(config["local_path"]).expanduser().resolve()
+        root_id = int(config["cloud_root_id"])
         cloud = self._make_cloud(config)
-        dir_cache = {"": int(config["cloud_root_id"])}
+        dir_cache = {"": root_id}
         total_missing_dirs: list[str] = []
         total_missing_files: list[str] = []
         for scope in scopes:
-            missing_dirs, missing_files = self._sync_scope(config, cloud, local_root, scope, dir_cache)
+            missing_dirs, missing_files = self._sync_scope(config, cloud, local_root, root_id, scope, dir_cache)
             total_missing_dirs.extend(missing_dirs)
             total_missing_files.extend(missing_files)
         if total_missing_dirs or len(total_missing_files) > 1:
             scope_text = "、".join(scope or "/" for scope in scopes)
             dir_text = "；".join(total_missing_dirs[:5]) if total_missing_dirs else "无"
-            file_text = "；".join(str(local_root / Path(path)) for path in total_missing_files[:5]) if total_missing_files else "无"
+            file_text = "；".join(str(to_local_path(path, local_root)) for path in total_missing_files[:5]) if total_missing_files else "无"
             suffix = " ..." if len(total_missing_dirs) > 5 or len(total_missing_files) > 5 else ""
             self.state.log(
                 "info",
@@ -186,73 +212,52 @@ class SyncService:
         config: dict[str, Any],
         cloud: Cloud115Service,
         local_root: Path,
+        root_id: int,
         scope: str,
         dir_cache: dict[str, int],
     ) -> tuple[list[str], list[str]]:
         local_rows = walk_local_tree(local_root, scope=scope)
-        local_map = {row["relative_path"]: row for row in local_rows}
-        cloud_paths: set[str] = set()
-        if scope:
-            try:
-                remote_scope_id = self._resolve_remote_directory_id(cloud, scope, dir_cache)
-            except Cloud115Error:
-                remote_scope_id = None
-            if remote_scope_id is not None:
-                cloud_paths = {entry.relative_path for entry in cloud.walk_tree(remote_scope_id, scope)}
-        else:
-            cloud_paths = {entry.relative_path for entry in cloud.walk_tree(int(config["cloud_root_id"]))}
-        missing_dirs = sorted(
-            [path for path, row in local_map.items() if row["is_dir"] and path not in cloud_paths],
+        local_dirs = sorted(
+            [row["relative_path"] for row in local_rows if row["is_dir"]],
             key=lambda item: item.count("/"),
         )
-        missing_files = sorted(
-            [path for path, row in local_map.items() if not row["is_dir"] and path not in cloud_paths]
-        )
-        self._ensure_directories(cloud, missing_dirs, dir_cache)
-        self._upload_missing_files(config, cloud, local_root, missing_files, dir_cache)
-        return missing_dirs, missing_files
+        local_files = sorted([row["relative_path"] for row in local_rows if not row["is_dir"]])
 
-    def _resolve_remote_directory_id(
-        self,
-        cloud: Cloud115Service,
-        relative_path: str,
-        dir_cache: dict[str, int],
-    ) -> int | None:
-        if not relative_path:
-            return dir_cache[""]
-        if relative_path in dir_cache:
-            return dir_cache[relative_path]
+        created_dirs: list[str] = []
+        for relative_dir in local_dirs:
+            _, created = cloud.ensure_remote_dir(root_id, relative_dir, dir_cache)
+            if created:
+                created_dirs.append(relative_dir)
 
-        current_remote_id = dir_cache[""]
-        current_path = ""
-        for part in PurePosixPath(relative_path).parts:
-            current_path = "/".join(filter(None, (current_path, part)))
-            if current_path in dir_cache:
-                current_remote_id = dir_cache[current_path]
-                continue
-            children = cloud.list_directory(current_remote_id)
-            matched = next((entry for entry in children if entry.is_dir and entry.name == part), None)
-            if matched is None:
-                return None
-            current_remote_id = matched.remote_id
-            dir_cache[current_path] = current_remote_id
-        return current_remote_id
+        files_by_parent: dict[str, list[str]] = {}
+        for relative_path in local_files:
+            files_by_parent.setdefault(relative_parent(relative_path), []).append(relative_path)
+
+        missing_files: list[str] = []
+        for parent_path, relative_paths in sorted(files_by_parent.items()):
+            parent_id, _ = cloud.ensure_remote_dir(root_id, parent_path, dir_cache)
+            _, remote_files = cloud.list_children(parent_id)
+            for relative_path in relative_paths:
+                if PurePosixPath(relative_path).name not in remote_files:
+                    missing_files.append(relative_path)
+
+        self._upload_missing_files(config, cloud, local_root, missing_files, root_id, dir_cache)
+        return created_dirs, missing_files
 
     def _ensure_directories(
         self,
         cloud: Cloud115Service,
+        root_id: int,
         missing_dirs: list[str],
         dir_cache: dict[str, int],
     ) -> None:
         for relative_path in missing_dirs:
-            name = PurePosixPath(relative_path).name
-            parent_path = relative_parent(relative_path)
-            parent_remote_id = self._resolve_remote_directory_id(cloud, parent_path, dir_cache)
-            if parent_remote_id is None:
-                raise Cloud115Error(f"云端父目录不存在：{parent_path or '/'}")
-            remote_id = cloud.ensure_directory(parent_remote_id, name)
+            remote_id, created = cloud.ensure_remote_dir(root_id, relative_path, dir_cache)
             dir_cache[relative_path] = remote_id
-            self.state.log("info", f"已创建云端目录：/{relative_path}")
+            if created:
+                self.state.log("info", f"已创建云端目录：/{relative_path}")
+            else:
+                self.state.log("info", f"云端目录已存在，跳过创建：/{relative_path}")
 
     def _upload_missing_files(
         self,
@@ -260,10 +265,11 @@ class SyncService:
         cloud: Cloud115Service,
         local_root: Path,
         missing_files: list[str],
+        root_id: int,
         dir_cache: dict[str, int],
     ) -> None:
         for relative_path in missing_files:
-            local_path = local_root / Path(relative_path)
+            local_path = to_local_path(relative_path, local_root)
             cloud_path = f"/{relative_path}" if relative_path else "/"
             if not local_path.exists():
                 self.state.reset_retry_state(relative_path)
@@ -274,9 +280,7 @@ class SyncService:
                 continue
 
             parent_path = relative_parent(relative_path)
-            parent_remote_id = self._resolve_remote_directory_id(cloud, parent_path, dir_cache)
-            if parent_remote_id is None:
-                raise Cloud115Error(f"云端目录不存在或无法定位：{parent_path or '/'}")
+            parent_remote_id, _ = cloud.ensure_remote_dir(root_id, parent_path, dir_cache)
 
             instant = cloud.attempt_instant_upload(local_path, parent_remote_id, local_path.name)
             response = instant["response"]

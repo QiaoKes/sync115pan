@@ -36,7 +36,7 @@ function currentCloudPathText() {
   if (cloudStack.length <= 1) {
     return "/";
   }
-  return cloudStack.slice(1).map((item) => item.name).join(" / ");
+  return `/${cloudStack.slice(1).map((item) => item.name).join("/")}`;
 }
 
 function collectConfigPayload() {

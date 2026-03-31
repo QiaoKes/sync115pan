@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sync115pan.localfs import dedupe_scopes, walk_local_tree
+from sync115pan.localfs import dedupe_scopes, to_local_path, walk_local_tree
 
 
 def test_walk_local_tree_collects_files_and_dirs(tmp_path: Path) -> None:
@@ -29,3 +29,9 @@ def test_dedupe_scopes_returns_parent_directories(tmp_path: Path) -> None:
         ],
     )
     assert scopes == ["a"]
+
+
+def test_to_local_path_rebuilds_local_path_from_posix_relative(tmp_path: Path) -> None:
+    resolved = to_local_path("番剧/T/01.mp4", tmp_path)
+
+    assert resolved == tmp_path.resolve() / "番剧" / "T" / "01.mp4"

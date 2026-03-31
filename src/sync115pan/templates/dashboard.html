@@ -44,9 +44,21 @@
       <label class="field">
         <span>本地目录</span>
         <div class="picker-row">
-          <input id="local_path" name="local_path" value="{{ config.local_path }}" placeholder="点击右侧按钮选择本地目录" readonly required>
+          <input
+            id="local_path"
+            name="local_path"
+            value="{{ config.local_path }}"
+            placeholder='{{ "点击右侧按钮选择本地目录" if local_picker_available else "请输入 NAS 上的绝对路径，例如 /srv/media" }}'
+            {% if local_picker_available %}readonly{% endif %}
+            required
+          >
+          {% if local_picker_available %}
           <button class="picker-btn" type="button" id="pick-local-btn">选择本地目录</button>
+          {% endif %}
         </div>
+        {% if not local_picker_available %}
+        <small class="field-hint">当前环境没有桌面目录选择器，请直接填写 NAS 上的绝对路径。配置文件默认保存在 {{ data_dir }}/config.json。</small>
+        {% endif %}
       </label>
 
       <label class="field">
